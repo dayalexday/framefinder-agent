@@ -1,0 +1,16 @@
+[project]
+name = "framefinder"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "cursor-sdk>=1.1.0",
+    "langgraph>=1.2.18",
+    "langsmith>=0.14.12",
+    "mlx>=0.32.4",
+    "numpy>=2.5.4",
+    "opencv-python-headless>=5.0.0.93",
+    "pillow>=13.0.0",
+    "pydantic>=2.14.1",
+    "python-dotenv>=1.2.4",
+    "regex>=2026.9.29",
+]

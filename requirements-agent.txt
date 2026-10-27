@@ -1,0 +1,9 @@
+# Python 3.10 or newer. The repo .venv is 3.9, and Homebrew's 3.12 reports an empty
+# macOS version here, so use the uv Python:
+#   ~/.local/bin/python3.12 -m venv .venv312
+#   .venv312/bin/pip install -r requirements.txt -r requirements-agent.txt
+langgraph>=0.2
+langsmith>=0.2
+pydantic>=2
+cursor-sdk
+python-dotenv>=1

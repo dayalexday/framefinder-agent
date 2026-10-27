@@ -1,0 +1,19 @@
+# Secrets
+.env
+
+# Local Python envs
+.venv/
+.venv312/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Personal / machine-local FrameFinder data
+# (manifest stores absolute paths like /Users/alex/Pictures/...)
+.framefinder_index/
+
+# Search thumbnails and contact sheets from your videos
+results/
+
+# Downloaded CLIP weights (rebuilt by ./setup.sh)
+mlx_model/

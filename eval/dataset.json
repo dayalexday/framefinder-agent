@@ -1,0 +1,9 @@
+{
+  "schema": {
+    "question": "what you would type",
+    "video": "filename or path substring of the right clip",
+    "timestamp_s": 0,
+    "tolerance_s": 10
+  },
+  "examples": []
+}

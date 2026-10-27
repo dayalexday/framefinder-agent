@@ -47,7 +47,7 @@ class FakeEmbedder:
 class ScriptedCaller:
     """Returns canned JSON shapes in the order the graph asks for them."""
 
-    def __init__(self, phrases: list[str], verdicts: list[tuple[bool, str]]):
+    def __init__(self, phrases: list[str], verdicts: list[tuple[bool, str, list[int] | None]]):
         self.phrases = list(phrases)
         self.verdicts = list(verdicts)
         self.calls: list[str] = []
@@ -57,8 +57,10 @@ class ScriptedCaller:
         if schema.__name__ == "SearchPhrase":
             return schema(phrase=self.phrases.pop(0))
         if schema.__name__ == "Verdict":
-            match, reason = self.verdicts.pop(0)
-            return schema(match=match, reason=reason)
+            match, reason, frames = self.verdicts.pop(0)
+            if frames is None:
+                frames = [1] if match else []
+            return schema(match=match, reason=reason, matched_frames=frames)
         n = len(images or [])
         return schema(captions=[f"caption {i}" for i in range(n)])
 
@@ -81,15 +83,17 @@ def indexed_video():
 def test_yes_stops():
     tmp, emb, index = indexed_video()
     try:
-        caller = ScriptedCaller(["green"], [(True, "the frame is green")])
+        caller = ScriptedCaller(["green"], [(True, "the frame is green", [1])])
         result = run_request("show me green", caller, emb, index, retries_left=2)
         assert caller.calls == ["SearchPhrase", "FrameNotes", "Verdict"], caller.calls
         assert [a["phrase"] for a in result["attempts"]] == ["green"]
         assert result["verdict"] is True
+        assert result["matched_indices"] == [0]
         assert 3 <= result["hits"][0]["t"] < 6
         assert "couldn't find a match" not in result["answer"]
         assert "Match" in result["answer"]
         assert "caption 0" in result["answer"]
+        assert "near misses:" not in result["answer"]
     finally:
         tmp.cleanup()
 
@@ -99,7 +103,7 @@ def test_no_then_better_search():
     try:
         caller = ScriptedCaller(
             ["red", "green"],
-            [(False, "that is not the boat"), (True, "green matches")],
+            [(False, "that is not the boat", []), (True, "green matches", [1])],
         )
         result = run_request("the boat", caller, emb, index, retries_left=2)
         assert [a["phrase"] for a in result["attempts"]] == ["red", "green"]
@@ -123,7 +127,7 @@ def test_retries_exhausted_admits_miss():
     try:
         caller = ScriptedCaller(
             ["red", "green", "blue"],
-            [(False, "no"), (False, "still no"), (False, "nothing matches")],
+            [(False, "no", []), (False, "still no", []), (False, "nothing matches", [])],
         )
         result = run_request("a boat on the ocean", caller, emb, index, retries_left=2)
         assert [a["phrase"] for a in result["attempts"]] == ["red", "green", "blue"]
@@ -146,6 +150,7 @@ def test_format_answer_labels_closest():
             "hits": [{"video": "/tmp/a.mp4", "t": 4.2, "score": 0.2, "caption": "a red square"}],
             "verdict": False,
             "reason": "no boat",
+            "matched_indices": [],
             "retries_left": 0,
             "attempts": [],
             "answer": "",
@@ -155,6 +160,32 @@ def test_format_answer_labels_closest():
     assert "closest:" in text
     assert "00:04" in text
     assert "a red square" in text
+
+
+def test_format_answer_splits_near_misses():
+    text = format_answer(
+        {
+            "request": "boat",
+            "search_phrase": "boat",
+            "hits": [
+                {"video": "/tmp/boat.mp4", "t": 32.0, "score": 0.3, "caption": "person on a boat deck"},
+                {"video": "/tmp/coast.mp4", "t": 4.0, "score": 0.2, "caption": "rocky coastline"},
+                {"video": "/tmp/beach.mp4", "t": 34.0, "score": 0.2, "caption": "kids on a beach"},
+            ],
+            "verdict": True,
+            "reason": "frame 1 is on a boat",
+            "matched_indices": [0],
+            "retries_left": 2,
+            "attempts": [],
+            "answer": "",
+        }
+    )
+    assert text.startswith("Match")
+    assert "person on a boat deck" in text
+    assert "near misses:" in text
+    assert text.index("person on a boat deck") < text.index("near misses:")
+    assert text.index("near misses:") < text.index("rocky coastline")
+    assert "kids on a beach" in text
 
 
 def test_extract_json_and_one_retry():
@@ -205,6 +236,7 @@ if __name__ == "__main__":
     test_no_then_better_search()
     test_retries_exhausted_admits_miss()
     test_format_answer_labels_closest()
+    test_format_answer_splits_near_misses()
     test_extract_json_and_one_retry()
     test_eval_refuses_to_score_without_questions()
     test_search_still_ranks_colors()

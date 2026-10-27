@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class SearchPhrase(BaseModel):
@@ -21,10 +21,12 @@ class SearchPhrase(BaseModel):
 
 
 class Verdict(BaseModel):
-    """Whether the captions satisfy the original request."""
+    """Whether the captions satisfy the original request, and which frames do."""
 
     match: bool
     reason: str = Field(min_length=1)
+    # 1-based caption numbers from the check prompt (frame 1, frame 2, …).
+    matched_frames: list[int] = Field(default_factory=list)
 
     @field_validator("reason")
     @classmethod
@@ -33,6 +35,16 @@ class Verdict(BaseModel):
         if not value:
             raise ValueError("empty reason")
         return value
+
+    @model_validator(mode="after")
+    def sync_match_and_frames(self) -> Verdict:
+        frames = sorted({n for n in self.matched_frames if n >= 1})
+        if self.match and not frames:
+            raise ValueError("match=true needs at least one matched_frames index")
+        if not self.match:
+            frames = []
+        self.matched_frames = frames
+        return self
 
 
 class Hit(TypedDict):
@@ -47,6 +59,7 @@ class Attempt(TypedDict):
     captions: list[str]
     match: bool
     reason: str
+    matched_indices: list[int]
 
 
 class AgentState(TypedDict):
@@ -55,6 +68,8 @@ class AgentState(TypedDict):
     hits: list[Hit]
     verdict: bool
     reason: str
+    # 0-based indexes into hits[:LOOK_COUNT] that the check said matched.
+    matched_indices: list[int]
     retries_left: int
     attempts: list[Attempt]
     answer: str

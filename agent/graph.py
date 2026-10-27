@@ -47,6 +47,7 @@ def run_request(
             "hits": [],
             "verdict": False,
             "reason": "",
+            "matched_indices": [],
             "retries_left": retries_left,
             "attempts": [],
             "answer": "",

@@ -29,21 +29,38 @@ def frame_jpeg(video: str, t: float) -> bytes | None:
     return buf.getvalue()
 
 
+def _hit_lines(hits: list[Hit], start: int = 1) -> list[str]:
+    lines: list[str] = []
+    for i, hit in enumerate(hits, start):
+        lines.append(f"{i}. {fmt_time(hit['t'])}  {hit['video']}")
+        lines.append(f"   {hit.get('caption') or '(no caption)'}")
+    return lines
+
+
 def format_answer(state: AgentState) -> str:
     rows = state["hits"][:LOOK_COUNT]
+    matched_set = set(state.get("matched_indices") or [])
     lines: list[str] = []
     if state["verdict"]:
+        good = [hit for i, hit in enumerate(rows) if i in matched_set]
+        near = [hit for i, hit in enumerate(rows) if i not in matched_set]
         lines.append("Match")
+        if not good:
+            lines.append("(no frames)")
+        else:
+            lines.extend(_hit_lines(good))
+        if near:
+            lines.append("near misses:")
+            lines.extend(_hit_lines(near, start=1))
     else:
         lines.append("couldn't find a match")
         if state.get("reason"):
             lines.append(state["reason"])
         lines.append("closest:")
-    if not rows:
-        lines.append("(no frames)")
-    for i, hit in enumerate(rows, 1):
-        lines.append(f"{i}. {fmt_time(hit['t'])}  {hit['video']}")
-        lines.append(f"   {hit.get('caption') or '(no caption)'}")
+        if not rows:
+            lines.append("(no frames)")
+        else:
+            lines.extend(_hit_lines(rows))
     return "\n".join(lines)
 
 
@@ -100,30 +117,50 @@ def make_nodes(caller: ModelCaller, embedder, index, *, top_k: int = 5, min_gap_
         return {"hits": updated}
 
     def check(state: AgentState) -> dict:
-        if not state["hits"]:
-            verdict = Verdict(match=False, reason="search returned no frames")
+        n = min(LOOK_COUNT, len(state["hits"]))
+        if n == 0:
+            verdict = Verdict(match=False, reason="search returned no frames", matched_frames=[])
         else:
             lines = []
-            for i, hit in enumerate(state["hits"][:LOOK_COUNT], 1):
+            for i, hit in enumerate(state["hits"][:n], 1):
                 lines.append(f"{i}. {hit['caption'] or '(frame unreadable)'}")
             verdict = caller.complete(
-                "Decide whether the frames match the request. A weak resemblance is not a match. "
-                "Match only if at least one caption shows what was asked for.\n"
+                "Decide which frames match the request. A weak resemblance is not a match. "
+                "matched_frames is the list of caption numbers (1, 2, 3, …) that actually show "
+                "what was asked for. match is true only if that list is non-empty. "
+                "Leave matched_frames empty when nothing matches.\n"
                 f"Request: {state['request']}\n"
                 f"Search phrase: {state['search_phrase']}\n"
                 "Captions:\n" + "\n".join(lines),
                 Verdict,
+            )
+        matched_indices = [
+            frame - 1
+            for frame in verdict.matched_frames
+            if 1 <= frame <= n
+        ]
+        # If the model said yes but pointed at bad indexes, treat it as a miss.
+        if verdict.match and not matched_indices:
+            verdict = Verdict(
+                match=False,
+                reason=verdict.reason + " (no valid matched_frames)",
+                matched_frames=[],
             )
         attempt = {
             "phrase": state["search_phrase"],
             "captions": [h["caption"] for h in state["hits"][:LOOK_COUNT]],
             "match": verdict.match,
             "reason": verdict.reason,
+            "matched_indices": matched_indices,
         }
-        _say(f"check: {'yes' if verdict.match else 'no'} ({verdict.reason})")
+        _say(
+            f"check: {'yes' if verdict.match else 'no'} "
+            f"frames={[i + 1 for i in matched_indices]} ({verdict.reason})"
+        )
         return {
             "verdict": verdict.match,
             "reason": verdict.reason,
+            "matched_indices": matched_indices,
             "attempts": [*state["attempts"], attempt],
         }
 

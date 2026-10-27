@@ -62,10 +62,13 @@ def plain_clips(question: str, embedder, index) -> dict:
 
 def agent_clips(question: str, caller, embedder, index) -> dict:
     state = run_request(question, caller, embedder, index)
+    rows = state["hits"][:LOOK_COUNT]
+    if state["verdict"] and state.get("matched_indices"):
+        rows = [rows[i] for i in state["matched_indices"] if i < len(rows)]
     return {
         "clips": [
             {"video": hit["video"], "t": hit["t"], "score": hit["score"], "caption": hit["caption"]}
-            for hit in state["hits"][:LOOK_COUNT]
+            for hit in rows
         ]
     }
 
